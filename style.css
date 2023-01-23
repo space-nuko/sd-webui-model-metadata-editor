@@ -1,0 +1,18 @@
+#metadata_editor_cover_image,
+#metadata_editor_cover_image > .h-60,
+#metadata_editor_cover_image > .h-60 > div,
+#metadata_editor_cover_image > .h-60 > div > img
+{
+    height: 480px !important;
+    max-height: 480px !important;
+    min-height: 480px !important;
+}
+
+[id^=metadata_editor_send_to_] {
+    display: flex;
+    align-content: center;
+    justify-content: center;
+    max-width: 2.5em;
+    min-width: 2.5em;
+    height: 2.4em;
+}
