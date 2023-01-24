@@ -525,10 +525,10 @@ Requested path was: {f}
       }
 
       write_lora_metadata(model_path, module, updates)
-      #if cover_image is None:
-      #  delete_webui_model_preview_image(model_path)
-      #else:
-      #  write_webui_model_preview_image(model_path, cover_image)
+      if cover_image is None:
+        delete_webui_model_preview_image(model_path)
+      else:
+        write_webui_model_preview_image(model_path, cover_image)
 
       return "Model saved.", model_hash, legacy_hash
 
