@@ -159,7 +159,7 @@ def get_all_models(paths, sort_by, filter_by):
   elif sort_by == "date":
     data = sorted(data, key=lambda x: -x["fileinfo"][1].st_mtime)
   elif sort_by == "path name":
-    data = sorted(data)
+    data = sorted(data, key=lambda x: x["fileinfo"][0])
   elif sort_by == "rating":
     data = sorted(data, key=lambda x: get_model_rating(x["fileinfo"][0]), reverse=True)
 
@@ -174,7 +174,7 @@ def get_all_models(paths, sort_by, filter_by):
 
     # Prevent a hypothetical "None.pt" from being listed.
     if name != "None":
-      full_name = name + f"({legacy_hash})"
+      full_name = filename + f"({legacy_hash})"
       #full_name = name + f"({model_hash[0:10]})"
       res[full_name] = filename
       #cache_hashes[filename] = {"model": model_hash, "legacy": legacy_hash, "mtime": stat.st_mtime}
@@ -358,6 +358,9 @@ Requested path was: {f}
       with gr.Column():
         with gr.Row():
           cover_image = gr.Image(label="Cover image", elem_id="metadata_editor_cover_image", source="upload", interactive=can_edit, type="pil", image_mode="RGBA").style(height=480)
+        with gr.Accordion("Image Parameters", open=False):
+          with gr.Row():
+            info2 = gr.HTML()
         with gr.Row():
           try:
               send_to_buttons = parameters_copypaste.create_buttons(["txt2img", "img2img", "inpaint", "extras"])
@@ -366,8 +369,7 @@ Requested path was: {f}
         with gr.Row():
           metadata_view = gr.JSON(value={}, label="Training parameters")
         with gr.Row(visible=False):
-          info1 = gr.Textbox()
-          info2 = gr.Textbox()
+          info1 = gr.HTML()
           img_file_info = gr.Textbox(label="Generate Info", interactive=False, lines=6)
 
     open_folder_button.click(fn=lambda p: open_folder(os.path.dirname(p)), inputs=[model_path], outputs=[])
