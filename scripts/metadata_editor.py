@@ -122,7 +122,11 @@ def hash_model_file(finfo):
     cached = cache("hashes").get(filename, None)
     if cached is None or stat.st_mtime != cached["mtime"]:
       if metadata is None and is_safetensors(filename):
-        metadata = safetensors_hack.read_metadata(filename)
+        try:
+          metadata = safetensors_hack.read_metadata(filename)
+        except Exception as ex:
+          print(f"[MetadataEditor] ERROR: Could not load file {filename} as .safetensors format! {ex}")
+          return None
       #model_hash = get_model_hash(metadata, filename)
       legacy_hash = get_legacy_hash(metadata, filename)
     else:
@@ -132,11 +136,33 @@ def hash_model_file(finfo):
   return {"model": None, "legacy": legacy_hash, "fileinfo": finfo}
 
 
+def has_user_metadata(filename):
+  if not is_safetensors(filename):
+    return False
+
+  try:
+    metadata = safetensors_hack.read_metadata(filename)
+    return metadata.get("ssmd_display_name", "").strip()
+  except:
+    return False
+
+
 def get_all_models(paths, sort_by, filter_by):
   fileinfos = []
   for path in paths:
     if os.path.isdir(path):
       fileinfos += traverse_all_files(path, [])
+
+  show_only_safetensors = shared.opts.data.get("metadata_editor_show_only_safetensors", False)
+  show_only_missing_meta = shared.opts.data.get("metadata_editor_show_only_models_with_metadata", "disabled")
+
+  if show_only_safetensors:
+    fileinfos = [x for x in fileinfos if is_safetensors(x[0])]
+
+  if show_only_missing_meta == "has metadata":
+    fileinfos = [x for x in fileinfos if has_user_metadata(x[0])]
+  elif show_only_missing_meta == "missing metadata":
+    fileinfos = [x for x in fileinfos if not has_user_metadata(x[0])]
 
   print("[MetadataEditor] Updating model hashes...")
   data = []
@@ -145,7 +171,8 @@ def get_all_models(paths, sort_by, filter_by):
   with tqdm.tqdm(total=len(fileinfos)) as pbar:
       for res in p.imap_unordered(hash_model_file, fileinfos):
           pbar.update()
-          data.append(res)
+          if res:
+              data.append(res)
   p.close()
 
   cache_hashes = cache("hashes")
@@ -333,7 +360,9 @@ Requested path was: {f}
           with gr.Column():
             gr.HTML(value="Copy metadata to other models in directory")
             copy_metadata_dir = gr.Textbox("", label="Containing directory", placeholder="All models in this directory will receive the selected model's metadata")
-            copy_same_session = gr.Checkbox(True, label="Only copy to models with same session ID")
+            with gr.Row():
+              copy_same_session = gr.Checkbox(True, label="Only copy to models with same session ID")
+              copy_no_metadata = gr.Checkbox(True, label="Only copy to models with no metadata")
             copy_metadata_button = gr.Button("Copy Metadata", variant="primary")
 
       with gr.Column():
@@ -374,7 +403,7 @@ Requested path was: {f}
 
     open_folder_button.click(fn=lambda p: open_folder(os.path.dirname(p)), inputs=[model_path], outputs=[])
 
-    def copy_metadata_to_all(module, model, copy_dir, same_session_only):
+    def copy_metadata_to_all(module, model, copy_dir, same_session_only, missing_meta_only, cover_image):
       if model == "None":
         return "No model loaded."
 
@@ -390,6 +419,7 @@ Requested path was: {f}
       if not os.path.isdir(copy_dir):
         return "Please provide a directory containing models in .safetensors format."
 
+      print(f"[MetadataEditor] Copying metadata to models in {copy_dir}.")
       metadata = read_lora_metadata(model_path, module)
       count = 0
       for entry in os.scandir(copy_dir):
@@ -398,6 +428,10 @@ Requested path was: {f}
           if path != model_path and is_safetensors(path):
             if same_session_only:
               other_metadata = safetensors_hack.read_metadata(path)
+              if missing_meta_only and other_metadata.get("ssmd_display_name", "").strip():
+                print(f"[MetadataEditor] Skipping {path} as it already has metadata")
+                continue
+
               session_id = metadata.get("ss_session_id", None)
               other_session_id = other_metadata.get("ss_session_id", None)
               if session_id is None or other_session_id is None or session_id != other_session_id:
@@ -419,12 +453,16 @@ Requested path was: {f}
                 updates[k] = v
 
             write_lora_metadata(path, module, updates)
+            if cover_image is None:
+              delete_webui_model_preview_image(model_path)
+            else:
+              write_webui_model_preview_image(model_path, cover_image)
             count += 1
 
       print(f"[MetadataEditor] Updated {count} models in directory {copy_dir}.")
       return f"Updated {count} models in directory {copy_dir}."
 
-    copy_metadata_button.click(fn=copy_metadata_to_all, inputs=[module, model, copy_metadata_dir, copy_same_session], outputs=[save_output])
+    copy_metadata_button.click(fn=copy_metadata_to_all, inputs=[module, model, copy_metadata_dir, copy_same_session, copy_no_metadata, cover_image], outputs=[save_output])
 
     def update_editing(enabled):
       updates = [gr.Textbox.update(interactive=enabled)] * 6
@@ -482,10 +520,9 @@ Requested path was: {f}
       #model_hash = metadata.get("sshs_model_hash", cache("hashes").get(model_path, {}).get("model", ""))
       legacy_hash = metadata.get("sshs_legacy_hash", cache("hashes").get(model_path, {}).get("legacy", ""))
 
-      return training_params, cover_image, display_name, author, source, keywords, description, rating, tags, model_hash, legacy_hash, model_path
+      return training_params, cover_image, display_name, author, source, keywords, description, rating, tags, model_hash, legacy_hash, model_path, os.path.dirname(model_path)
 
-    model.change(refresh_metadata, inputs=[module, model], outputs=[metadata_view, cover_image, display_name, author, source, keywords, description, rating, tags, model_hash, legacy_hash, model_path])
-    model.change(lambda: "", inputs=[], outputs=[copy_metadata_dir])
+    model.change(refresh_metadata, inputs=[module, model], outputs=[metadata_view, cover_image, display_name, author, source, keywords, description, rating, tags, model_hash, legacy_hash, model_path, copy_metadata_dir])
 
     def save_metadata(module, model, cover_image, display_name, author, source, keywords, description, rating, tags):
       if model == "None":
@@ -532,7 +569,8 @@ Requested path was: {f}
       else:
         write_webui_model_preview_image(model_path, cover_image)
 
-      return "Model saved.", model_hash, legacy_hash
+      model_name = os.path.basename(model_path)
+      return f"Model saved: {model_name}", model_hash, legacy_hash
 
     save_metadata_button.click(save_metadata, inputs=[module, model, cover_image, display_name, author, source, keywords, description, rating, tags], outputs=[save_output, model_hash, legacy_hash])
 
@@ -546,6 +584,9 @@ def on_ui_settings():
     shared.opts.add_option("metadata_editor_model_name_filter", shared.OptionInfo("", "Model name filter", section=section))
     shared.opts.add_option("metadata_editor_back_up_model_when_saving", shared.OptionInfo(True, "Make a backup copy of the model being edited when saving its metadata.", section=section))
     shared.opts.add_option("metadata_editor_hash_thread_count", shared.OptionInfo(1, "# of threads to use for hash calculation (increase if using an SSD)", section=section))
+    shared.opts.add_option("metadata_editor_show_only_safetensors", shared.OptionInfo(False, "Only show .safetensors format models", section=section))
+    shared.opts.add_option("metadata_editor_show_only_models_with_metadata", shared.OptionInfo("disabled", "Only show models that have/don't have user-added metadata", gr.Radio, {"choices": ["disabled", "has metadata", "missing metadata"]}, section=section))
+
 
 
 script_callbacks.on_ui_tabs(on_ui_tabs)
